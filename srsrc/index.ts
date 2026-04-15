@@ -1,6 +1,6 @@
-import express, { Request, Response } from "express";
+import express, { Request, Response, NextFunction } from "express";
 import { createClient } from "@supabase/supabase-js";
-import * as fal from "@fal-ai/client";
+import { fal } from "@fal-ai/client";
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -15,10 +15,11 @@ fal.config({ credentials: FAL_API_KEY });
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-function authCheck(req: Request, res: Response, next: Function) {
+function authCheck(req: Request, res: Response, next: NextFunction) {
   const secret = req.headers["x-worker-secret"];
   if (secret !== WORKER_SECRET) {
-    return res.status(401).json({ error: "Unauthorized" });
+    res.status(401).json({ error: "Unauthorized" });
+    return;
   }
   next();
 }
@@ -29,7 +30,8 @@ app.post("/generate", authCheck, async (req: Request, res: Response) => {
   const { job_id, guest_selfie_url, groom_face_url, bride_face_url, event_id, guest_id } = req.body;
 
   if (!job_id || !guest_selfie_url || !groom_face_url || !bride_face_url) {
-    return res.status(400).json({ error: "Missing required fields" });
+    res.status(400).json({ error: "Missing required fields" });
+    return;
   }
 
   res.json({ status: "accepted", job_id });
