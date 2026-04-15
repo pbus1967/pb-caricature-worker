@@ -1,6 +1,5 @@
 import express, { Request, Response, NextFunction } from "express";
 import { createClient } from "@supabase/supabase-js";
-import { fal } from "@fal-ai/client";
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -11,9 +10,20 @@ const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const FAL_API_KEY = process.env.FAL_API_KEY!;
 
-fal.config({ credentials: FAL_API_KEY });
-
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+async function falRun(model: string, input: any): Promise<any> {
+  const res = await fetch(`https://fal.run/${model}`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Key ${FAL_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(`fal.run error: ${await res.text()}`);
+  return res.json();
+}
 
 function authCheck(req: Request, res: Response, next: NextFunction) {
   const secret = req.headers["x-worker-secret"];
@@ -28,26 +38,18 @@ app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
 app.post("/generate", authCheck, async (req: Request, res: Response) => {
   const { job_id, guest_selfie_url, groom_face_url, bride_face_url, event_id, guest_id } = req.body;
-
   if (!job_id || !guest_selfie_url || !groom_face_url || !bride_face_url) {
     res.status(400).json({ error: "Missing required fields" });
     return;
   }
-
   res.json({ status: "accepted", job_id });
-
   runPipeline({ job_id, guest_selfie_url, groom_face_url, bride_face_url, event_id, guest_id })
     .catch(async (err) => {
       console.error("Pipeline error:", err);
-      await supabase
-        .from("wedding_photos")
-        .update({
-          status: "failed",
-          stage: "failed",
-          error_message: String(err),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", job_id);
+      await supabase.from("wedding_photos").update({
+        status: "failed", stage: "failed",
+        error_message: String(err), updated_at: new Date().toISOString(),
+      }).eq("id", job_id);
     });
 });
 
@@ -74,32 +76,33 @@ async function runPipeline({ job_id, guest_selfie_url, groom_face_url, bride_fac
 
   const baseImages: string[] = [];
   for (const scene of scenes) {
-    const result = await fal.run("fal-ai/flux/dev", {
-      input: { prompt: scene.prompt, num_images: 1, image_size: "portrait_4_3", num_inference_steps: 28, guidance_scale: 3.5 },
-    }) as any;
+    const result = await falRun("fal-ai/flux/dev", {
+      prompt: scene.prompt, num_images: 1,
+      image_size: "portrait_4_3", num_inference_steps: 28, guidance_scale: 3.5,
+    });
     baseImages.push(result.images[0].url);
   }
 
   await updateStatus("couple_swap");
   const coupleSwapped: string[] = [];
   for (let i = 0; i < baseImages.length; i++) {
-    const result = await fal.run("fal-ai/easel-ai/advanced-face-swap", {
-      input: { base_image_url: baseImages[i], swap_faces: [
+    const result = await falRun("fal-ai/easel-ai/advanced-face-swap", {
+      base_image_url: baseImages[i],
+      swap_faces: [
         { reference_face_url: groom_face_url, face_index: 0 },
         { reference_face_url: bride_face_url, face_index: 1 },
-      ]},
-    }) as any;
+      ],
+    });
     coupleSwapped.push(result.image.url);
   }
 
   await updateStatus("guest_swap");
   const finalImages: string[] = [];
   for (let i = 0; i < coupleSwapped.length; i++) {
-    const result = await fal.run("fal-ai/easel-ai/advanced-face-swap", {
-      input: { base_image_url: coupleSwapped[i], swap_faces: [
-        { reference_face_url: guest_selfie_url, face_index: 2 },
-      ]},
-    }) as any;
+    const result = await falRun("fal-ai/easel-ai/advanced-face-swap", {
+      base_image_url: coupleSwapped[i],
+      swap_faces: [{ reference_face_url: guest_selfie_url, face_index: 2 }],
+    });
     finalImages.push(result.image.url);
   }
 
@@ -107,6 +110,8 @@ async function runPipeline({ job_id, guest_selfie_url, groom_face_url, bride_fac
     status: "completed", stage: "done", result_urls: finalImages,
     completed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
   }).eq("id", job_id);
+
+  console.log(`Job ${job_id} completed!`);
 }
 
 app.listen(PORT, () => console.log(`Worker running on port ${PORT}`));
