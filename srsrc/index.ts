@@ -2,8 +2,11 @@ import express, { Request, Response, NextFunction } from "express";
 import { createClient } from "@supabase/supabase-js";
 
 const app = express();
-app.use(express.json({ limit: "50mb" }));
 
+app.use(express.json({ limit: "50mb" }));
+app.get("/health", (req, res) => {
+  res.send("OK");
+});
 const PORT = process.env.PORT || 3000;
 const WORKER_SECRET = process.env.RAILWAY_WORKER_SECRET!;
 const SUPABASE_URL = process.env.SUPABASE_URL!;
