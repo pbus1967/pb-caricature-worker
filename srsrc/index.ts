@@ -278,6 +278,4 @@ async function runPipeline({
   console.log(`Job completed successfully for guest_id=${guest_id}, scene_key=${scene_key}`);
 }
 
-app.listen(Number(PORT), "0.0.0.0", () => {
-  console.log(`Worker running on port ${PORT}`);
-});
+app.listen(process.env.PORT || 8080, "0.0.0.0", () => {
